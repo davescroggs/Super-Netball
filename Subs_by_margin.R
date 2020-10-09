@@ -1,6 +1,7 @@
 library(tidyverse)
 library(superNetballR)
 library(tidytext)
+library(RColorBrewer)
 
 ## Load Season 2020 Data
 Season_id <- "11108"
@@ -60,10 +61,10 @@ subs_with_scores <- bind_rows(score_flow,player_subs) %>%
            score_margin = case_when(
              between(score_difference,6,100) ~ "6+ up", 
              between(score_difference,1,5) ~ "1-5 up", 
-             score_difference == 0 ~ "Level",
+             score_difference == 0 ~ "Even",
              between(score_difference,-5,-1) ~ "1-5 down", 
              between(score_difference,-100,-6) ~ "6+ down"),
-           score_margin = factor(score_margin,levels = c("6+ up","1-5 up","Level","1-5 down","6+ down"),ordered = T),
+           score_margin = factor(score_margin,levels = c("6+ up","1-5 up","Even","1-5 down","6+ down"),ordered = T),
            score_difference = if_else(homeTeam == "Home",score_difference,-score_difference))
 
 # Organise the subs into a consistent format
@@ -95,6 +96,10 @@ sub_transitions <- subs_with_scores %>%
            str_detect(subs,"GD|GK") ~ "Defenders",
            TRUE ~ "Other"))
 
+#######################################
+#               Plots                 #
+#######################################
+
 # Plot 1 - Sub count over time with respect to margin and quarter
 
 subs_with_scores %>%
@@ -116,6 +121,8 @@ subs_with_scores %>%
 
 # Plot 2 - Sub count over time with respect to margin and quarter, broken down by sub type
 
+mycolors <- colorRampPalette(brewer.pal(8, "Set1"))(10)
+
 sub_transitions %>% 
   filter(periodSeconds > 0,!is.na(sub_combined)) %>%
   distinct(Round,Match,period,periodSeconds,squadId,.keep_all = TRUE) %>% 
@@ -126,13 +133,13 @@ sub_transitions %>%
   count(period,period_minute,subs,score_margin,num_subs) %>% 
   ggplot(aes(x = period_minute,y = n,fill = fct_reorder(subs,desc(num_subs)))) +
   geom_col() +
-  facet_grid(fct_relevel(score_margin,c("6+ up","1-5 up","Level","1-5 down","6+ down"))~paste("Quarter",period)) +
+  facet_grid(score_margin~paste("Quarter",period)) +
   labs(y = "Counts",
        x = "Period Minute",
        fill = "Substitution Type",
        title = "Number of subs by score margin, broken down by sub type",
        subtitle = "Season 2020, in-quarter subs only") +
-  scale_fill_brewer(palette = "Set1") +
+  scale_fill_manual(values = mycolors) +
   theme(plot.title = element_text(hjust = 0.5),plot.subtitle = element_text(hjust = 0.5))
 
 # Plot 3 - Sub count with respect to margin and quarter, broken down by sub type
@@ -143,14 +150,19 @@ sub_transitions %>%
   mutate(period_minute = round(periodSeconds/60),
          Super = if_else(period_minute  >= 10,"Power 5","Regulation"),
          subs = fct_lump(factor(subs),8)) %>%
-  count(period,score_margin,subs,court_pos) %>% 
-  mutate(subs_reordered = reorder_within(subs,n,within = list(period,score_margin))) %>%
+  count(period,score_margin,subs) %>% 
+  mutate(subs_reordered = reorder_within(subs,n,within = list(period,score_margin)),
+         court_pos = case_when(
+           str_detect(subs,"GA|GS") ~ "Shooters",
+           str_detect(subs,"WA|C|WD") ~ "Mid court",
+           str_detect(subs,"GD|GK") ~ "Defenders",
+           TRUE ~ "Other")) %>%
   ungroup() %>% 
-  ggplot(aes(subs_reordered,n,fill = court_pos)) +
+  ggplot(aes(subs_reordered,n,fill = fct_relevel(court_pos,c("Shooters","Mid court","Defenders","Other")))) +
   geom_col() +
   scale_x_reordered() +
   coord_flip() +
-  facet_wrap(fct_relevel(score_margin,c("6+ up","1-5 up","Level","1-5 down","6+ down"))~paste("Quarter",period),scales = "free_y",ncol = 4) +
+  facet_wrap(score_margin~paste("Quarter",period),scales = "free_y",ncol = 4) +
   labs(y = "Counts",
        x = "Substitution type",
        fill = "Position Type",

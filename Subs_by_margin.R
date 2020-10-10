@@ -51,21 +51,24 @@ home_away <- match_stats %>%
             squadNickname,homeTeam)
 
 subs_with_scores <- bind_rows(score_flow,player_subs) %>%
-    left_join(home_away) %>% 
+    left_join(home_away,by = c("Round", "Match", "squadId")) %>% 
     arrange(Round,Match,period,periodSeconds) %>% 
     group_by(Round,Match) %>% 
     mutate(score_difference = if_else(homeTeam == "Home",scorepoints,-scorepoints),
            score_difference = replace_na(score_difference,0),
-           score_difference = cumsum(score_difference)) %>%
-    mutate(score_difference = if_else(homeTeam == "Home",score_difference,-score_difference),
+           score_difference = cumsum(score_difference),
+           score_difference = if_else(homeTeam == "Home",score_difference,-score_difference),
            score_margin = case_when(
              between(score_difference,6,100) ~ "6+ up", 
              between(score_difference,1,5) ~ "1-5 up", 
-             score_difference == 0 ~ "Even",
+           score_difference == 0 ~ "Even",
              between(score_difference,-5,-1) ~ "1-5 down", 
              between(score_difference,-100,-6) ~ "6+ down"),
-           score_margin = factor(score_margin,levels = c("6+ up","1-5 up","Even","1-5 down","6+ down"),ordered = T),
-           score_difference = if_else(homeTeam == "Home",score_difference,-score_difference))
+           score_margin = factor(score_margin,
+                                 levels = c("6+ up","1-5 up","Even","1-5 down","6+ down"),
+                                 ordered = T),
+           score_difference = if_else(homeTeam == "Home",score_difference,-score_difference)) %>% 
+  ungroup()
 
 # Organise the subs into a consistent format
 
@@ -83,7 +86,7 @@ sub_transitions <- subs_with_scores %>%
   distinct(Round,Match,period,periodSeconds,squadId) %>%
   ungroup() %>% 
   mutate(id = 1:n()) %>% 
-  right_join(filter(subs_with_scores, !is.na(sub_combined), periodSeconds > 0)) %>%
+  right_join(filter(subs_with_scores, !is.na(sub_combined))) %>%
   group_by(id) %>% 
   mutate(id,subs = paste0(sub_combined,collapse = "-")) %>% 
   distinct(id,subs,.keep_all = TRUE) %>% 
@@ -92,13 +95,13 @@ sub_transitions <- subs_with_scores %>%
          subs = mapply(reorder_subs,subs),
          court_pos = case_when(
            str_detect(subs,"GA|GS") ~ "Shooters",
+           str_count(subs,"-") > 1 ~ "Multiple",
            str_detect(subs,"WA|C|WD") ~ "Mid court",
            str_detect(subs,"GD|GK") ~ "Defenders",
            TRUE ~ "Other"))
 
-#######################################
-#               Plots                 #
-#######################################
+
+# Plots -------------------------------------------------------------------
 
 # Plot 1 - Sub count over time with respect to margin and quarter
 
@@ -119,18 +122,19 @@ subs_with_scores %>%
   scale_fill_manual(values = c("red","grey60")) +
   theme(plot.title = element_text(hjust = 0.5),plot.subtitle = element_text(hjust = 0.5))
 
+
 # Plot 2 - Sub count over time with respect to margin and quarter, broken down by sub type
 
-mycolors <- colorRampPalette(brewer.pal(8, "Set1"))(10)
+mycolors <- colorRampPalette(brewer.pal(8, "Set1"))(12)
 
 sub_transitions %>% 
-  filter(periodSeconds > 0,!is.na(sub_combined)) %>%
+  filter(periodSeconds > 0,!is.na(sub_combined),squadNickname == "Vixens") %>%
   distinct(Round,Match,period,periodSeconds,squadId,.keep_all = TRUE) %>% 
   mutate(period_minute = round(periodSeconds/60),
          Super = if_else(period_minute  >= 10,"Power 5","Regulation"),
          subs = fct_lump(factor(subs),8)) %>%
   add_count(subs,name = "num_subs") %>%
-  count(period,period_minute,subs,score_margin,num_subs) %>% 
+  count(period,period_minute,subs,score_margin,num_subs) %>%
   ggplot(aes(x = period_minute,y = n,fill = fct_reorder(subs,desc(num_subs)))) +
   geom_col() +
   facet_grid(score_margin~paste("Quarter",period)) +
@@ -138,9 +142,14 @@ sub_transitions %>%
        x = "Period Minute",
        fill = "Substitution Type",
        title = "Number of subs by score margin, broken down by sub type",
-       subtitle = "Season 2020, in-quarter subs only") +
+       subtitle = "Season 2020, Melbourne Vixens") +
   scale_fill_manual(values = mycolors) +
-  theme(plot.title = element_text(hjust = 0.5),plot.subtitle = element_text(hjust = 0.5))
+  scale_y_continuous(breaks = 0:3) +
+  expand_limits(y = c(0,3)) +
+  theme(plot.title = element_text(hjust = 0.5),
+        plot.subtitle = element_text(hjust = 0.5,
+        colour = "#27AD81FF",
+        face = "bold"))
 
 # Plot 3 - Sub count with respect to margin and quarter, broken down by sub type
 
